@@ -227,6 +227,59 @@ impl Tokenizer {
     }
 }
 
+fn bpe_encode(prompt: &str, tokenizer: &Tokenizer, vocab_size: usize, max_token_size: usize) -> Result<Vec<usize>, String> {
+    let mut tokens: Vec<usize> = Vec::with_capacity(prompt.len());
+    let toks = tokenizer.toks.as_ref();
+    let str_lookup = |c: String| -> Option<usize> {
+        let c_string = c.to_string();
+        for i in 0..toks.len() {
+            if toks[i].token == c_string {
+                //println!("Found match: {}", toks[i].token);
+                return Some(i);
+            }
+        }
+        None
+    };
+    // encode every byte in the prompt
+    let mut tokens: Vec<usize> = vec![];
+    for c in prompt.chars() {
+        if let Some(v) =  str_lookup(c.to_string()) {
+            //println!("Tokenizing {} to {}", c, &*tokenizer.toks[v].token);
+            tokens.push(v);
+        } else {
+            return Err(format!("Could not tokenize {}", c));
+        }
+    }
+    loop {
+        let mut best_score: f32 = -1e10;
+        let mut best_id: usize = usize::MAX;
+        let mut best_idx: usize = usize::MAX;
+        for i in 0..tokens.len() - 1 {
+            let idx = tokens[i];
+            let nex_idx = tokens[i + 1];
+            let merged = toks[idx].token.clone() + toks[nex_idx].token.as_str();
+            let m_c = merged.clone();
+            if let Some(v) = str_lookup(merged) {
+                let score = toks[v].score;
+                if score > best_score {
+                    best_score = score;
+                    best_id = v;
+                    best_idx = i;
+                }
+            }
+        }
+        if best_idx == usize::MAX {
+            break;
+        }
+        tokens[best_idx] = best_id;
+        for i in best_idx + 1..tokens.len() - 1 {
+            tokens[i] = tokens[i + 1];
+        }
+        tokens.pop();
+    }
+    Ok(tokens)
+}
+
 fn accum(a: &mut [f32], b: &[f32]) {
     assert!(a.len() == b.len(), "a and b should be equal length slices");
     for i in 0..a.len() {
@@ -348,4 +401,18 @@ fn main() {
     let (max_token_size, tokenizer) = read_tokenizer(tokenizer_file, config.vocab_size);
     println!("Config: {:?}", config);
     println!("Max token size: {}", max_token_size);
+
+    //TODO: Get from cmd
+    let steps = config.seq_len;
+    let runstate = RunState::new(&config);
+
+    // TODO: Get from cmd
+    let prompt = "Hello, my name is Raghav. Who are you?";
+    let tokens = bpe_encode(prompt, &tokenizer, config.vocab_size as usize, max_token_size as usize)
+        .expect("Could not encode provided prompt");
+    let mut s = String::new();
+    for i in 0..tokens.len() {
+        s.push_str(&*tokenizer.toks[tokens[i]].token.as_str());
+    }
+    assert!(s == prompt);
 }

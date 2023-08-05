@@ -1,6 +1,7 @@
 use std::fs::read;
 use std::rc::Rc;
 use std::ptr::slice_from_raw_parts;
+use matrixmultiply::sgemm;
 
 #[derive(Debug)]
 pub struct Config {
@@ -146,6 +147,53 @@ impl TransformerWeights {
             freq_cis_imag,
             wcls,
         }
+    }
+}
+
+fn accum(a: &mut [f32], b: &[f32]) {
+    assert!(a.len() == b.len(), "a and b should be equal length slices");
+    for i in 0..a.len() {
+        a[i] += b[i];
+    }
+}
+
+fn rmsnorm(out: *mut [f32], x: &[f32], w: &[f32]) {
+    assert!(x.len() == w.len(), "out and x should be equal length slices");
+    let mut ss: f32 = 0.0;
+    for i in 0..x.len() {
+        ss += x[i] * x[i];
+    }
+    ss /= x.len() as f32;
+    ss += 1e-5;
+    ss = 1.0 / ss.sqrt();
+    unsafe {
+        for i in 0..x.len() {
+            (*out)[i] = x[i] * w[i] * ss;
+        }
+    }
+}
+
+fn softmax(x: &mut[f32]) {
+    let mut max_val = x[0];
+    for i in 1..x.len() {
+        if x[i] > max_val {
+            max_val = x[i];
+        }
+    }
+    let mut sum: f32 = 0.0;
+    for i in 0..x.len() {
+        x[i] = (x[i] - max_val).exp();
+        sum += x[i];
+    }
+    for i in 0..x.len() {
+        x[i] /= sum;
+    }
+}
+
+fn matmut(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
+    // Multiply W (d, n) * X(n, q) and store in xout (d, 1)
+    unsafe {
+        sgemm(d, n, 1, 1.0, x.as_ptr(), 1, 1, x.as_ptr(), 1, 1, 0.0, xout, 1, 1);
     }
 }
 

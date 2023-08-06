@@ -430,7 +430,7 @@ impl Tokenizer {
     }
 }
 
-fn bpe_encode(prompt: &str, tokenizer: &Tokenizer, vocab_size: usize, max_token_size: usize) -> Result<Vec<usize>, String> {
+fn bpe_encode(prompt: &str, tokenizer: &Tokenizer) -> Result<Vec<usize>, String> {
     let mut tokens: Vec<usize> = Vec::with_capacity(prompt.len());
     let toks = tokenizer.toks.as_ref();
     let str_lookup = |c: String| -> Option<usize> {
@@ -524,9 +524,23 @@ fn softmax(x: &mut[f32]) {
 }
 
 fn matmul(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
-    // Multiply W (d, n) * X(n, q) and store in xout (d, 1)
+    // Multiply W (d, n) * X(n, 1) and store in xout (d, 1)
     unsafe {
-        sgemm(d, n, 1, 1.0, w.as_ptr(), 1, 1, x.as_ptr(), 1, 1, 0.0, xout, 1, 1);
+        sgemm(
+            d,
+            n,
+            1,
+            1.0,
+            w.as_ptr(),
+            d as isize,
+            1,
+            x.as_ptr(),
+            n as isize,
+            1,
+            0.0,
+            xout,
+            d as isize,
+            1);
     }
 }
 
@@ -623,8 +637,8 @@ fn main() {
 
     // TODO: Get from cmd
     //let prompt = "Hello, my name is Raghav. Who are you?";
-    let prompt = "Lorem Ipsum";
-    //let prompt_tokens = bpe_encode(prompt, &tokenizer, config.vocab_size as usize, max_token_size as usize)
+    let prompt = "Hello,";
+    //let prompt_tokens = bpe_encode(prompt, &tokenizer)
     //    .expect("Could not encode provided prompt");
     let prompt_tokens = vec![];
 

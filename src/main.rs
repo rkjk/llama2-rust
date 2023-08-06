@@ -225,7 +225,10 @@ impl RunState {
         // forward all the layers
         for l in 0..n_layers {
             // attention rmsnorm
-            rmsnorm(self.xb.as_mut_ptr(), self.x.as_ref(), self.transformer_weights.rms_att_weight[l * dim..(l + 1) * dim].as_ref());
+            rmsnorm(
+                self.xb.as_mut_ptr(),
+                self.x.as_ref(),
+                self.transformer_weights.rms_att_weight[l * dim..(l + 1) * dim].as_ref());
             //println!("xb for layer {} -> {:?}", l, self.xb);
             // qkv matmuls for this position
             matmul(
@@ -238,7 +241,7 @@ impl RunState {
             matmul(
                 self.k.as_mut_ptr(),
                 self.xb.as_ref(),
-                self.transformer_weights.wq[(l * dim * dim)..((l + 1) * dim * dim)].as_ref(),
+                self.transformer_weights.wk[(l * dim * dim)..((l + 1) * dim * dim)].as_ref(),
                 dim,
                 dim
             );
@@ -246,7 +249,7 @@ impl RunState {
             matmul(
                 self.v.as_mut_ptr(),
                 self.xb.as_ref(),
-                self.transformer_weights.wq[(l * dim * dim)..((l + 1) * dim * dim)].as_ref(),
+                self.transformer_weights.wv[(l * dim * dim)..((l + 1) * dim * dim)].as_ref(),
                 dim,
                 dim
             );
@@ -525,6 +528,7 @@ fn softmax(x: &mut[f32]) {
 
 fn matmul(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
     // Multiply W (d, n) * X(n, 1) and store in xout (d, 1)
+    /*
     unsafe {
         sgemm(
             d,
@@ -539,8 +543,18 @@ fn matmul(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
             1,
             0.0,
             xout,
-            d as isize,
+            1,
             1);
+    }
+     */
+    for i in 0..d {
+        let mut val: f32 = 0.0;
+        for j in 0..n {
+            val += w[i * n + j] * x[j];
+        }
+        unsafe {
+            *xout.offset(i as isize) = val;
+        }
     }
 }
 
@@ -632,23 +646,18 @@ fn main() {
 
     //TODO: Get from cmd
     //let steps = config.seq_len as usize;
-    let steps = 20;
+    let steps = config.seq_len as usize;
     let mut runstate = RunState::new(&config, transformer_weights);
 
     // TODO: Get from cmd
     //let prompt = "Hello, my name is Raghav. Who are you?";
     let prompt = "Hello,";
-    //let prompt_tokens = bpe_encode(prompt, &tokenizer)
-    //    .expect("Could not encode provided prompt");
-    let prompt_tokens = vec![];
+    let prompt_tokens = bpe_encode(prompt, &tokenizer)
+        .expect("Could not encode provided prompt");
+    //let prompt_tokens = vec![];
 
     // TODO: Get from cmd
     let temperature: f32 = 0.0;
-    //let mut s = String::new();
-    //for i in 0..prompt_tokens.len() {
-    //    s.push_str(&*tokenizer.toks[tokens[i]].token.as_str());
-    //}
-    //assert!(s == prompt);
     let tokens = &*tokenizer.toks;
     let mut cur_token_idx: usize = 1;
     let mut next: usize = 0;

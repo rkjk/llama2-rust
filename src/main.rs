@@ -1,5 +1,7 @@
 use std::cmp::max;
 use std::fs::read;
+use std::io;
+use std::io::Write;
 use std::ops::DerefMut;
 use std::ptr;
 use std::rc::Rc;
@@ -213,7 +215,8 @@ impl RunState {
 
         // copy the token embedding into x
         let offset = token * dim;
-        let content_row: &[f32] = &self.transformer_weights.token_embedding_table[offset..offset + dim];
+        self.x.copy_from_slice(&self.transformer_weights.token_embedding_table[offset..offset + dim]);
+        //println!("Activation at start: {:?}", self.x);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         let freq_cis_real_row: &[f32] = &self.transformer_weights.freq_cis_real[(pos * head_size / 2)..((pos + 1) * head_size / 2)];
@@ -223,7 +226,7 @@ impl RunState {
         for l in 0..n_layers {
             // attention rmsnorm
             rmsnorm(self.xb.as_mut_ptr(), self.x.as_ref(), self.transformer_weights.rms_att_weight[l * dim..(l + 1) * dim].as_ref());
-
+            //println!("xb for layer {} -> {:?}", l, self.xb);
             // qkv matmuls for this position
             matmul(
                 self.q.as_mut_ptr(),
@@ -231,6 +234,7 @@ impl RunState {
                 self.transformer_weights.wq[(l * dim * dim)..((l + 1) * dim * dim)].as_ref(),
             dim,
             dim);
+            //println!("Query for layer {} -> {:?}", l, self.q);
             matmul(
                 self.k.as_mut_ptr(),
                 self.xb.as_ref(),
@@ -238,6 +242,7 @@ impl RunState {
                 dim,
                 dim
             );
+            //println!("Key for layer {} -> {:?}", l, self.k);
             matmul(
                 self.v.as_mut_ptr(),
                 self.xb.as_ref(),
@@ -245,6 +250,7 @@ impl RunState {
                 dim,
                 dim
             );
+            //println!("Value for layer {} -> {:?}", l, self.v);
             // apply RoPE rotation to the q and k vectors for each head
             for h in 0..n_heads as usize {
                 // get the q and k vectors for this head
@@ -264,11 +270,15 @@ impl RunState {
                     k[i+1] = k0 * fci + k1 * fcr;
                 }
             }
+            //println!("Query after  RoPE for layer {} -> {:?}", l, self.q);
+            //println!("Value after RoPE for layer {} -> {:?}", l, self.k);
             // save key,value at this time step (pos) to our kv cache
             let loff: usize = l * seq_len * dim; // kv cache layer offset for convenience
             let nloff = loff + pos * dim;
             self.key_cache[nloff..nloff + dim].copy_from_slice(self.k.as_ref());
             self.value_cache[nloff..nloff + dim].copy_from_slice(self.v.as_ref());
+            //println!("Key cache at layer {} -> {:?}", l, &self.key_cache[nloff..nloff + dim]);
+            //println!("Value cache at layer {} -> {:?}", l, &self.value_cache[nloff..nloff + dim]);
 
             // multihead attention. iterate over all heads
             // TODO: Make parallel
@@ -277,7 +287,7 @@ impl RunState {
                 let q: &[f32] = &self.q[h * head_size..(h + 1) * head_size];
                 // attention scores for this head
                 // TODO: Check length = pos + 1
-                let att: &mut [f32] = &mut self.att[h * seq_len..(h * seq_len + pos + 1)];
+                let att: &mut [f32] = &mut self.att[(h * seq_len)..(h * seq_len + pos + 1)];
                 // iterate over all timesteps, including the current one
                 for t in 0..pos+1 {
                     // get the key vector for this head and at this timestep
@@ -294,6 +304,7 @@ impl RunState {
                 }
                 // softmax the scores to get attention weights, from 0..pos inclusively
                 softmax(att);
+                //println!("Attention after softmax for head {} -> {:?}", h, att);
 
                 // weighted sum of the values, store back into xb
                 let xb = &mut self.xb[h * head_size..((h + 1) * head_size)];
@@ -310,6 +321,7 @@ impl RunState {
                     }
                 }
             }
+            //println!("xb after multi-head layer {} -> {:?}", l, self.xb);
             // final matmul to get the output of the attention
             matmul(
                 self.xb2.as_mut_ptr(),
@@ -318,8 +330,10 @@ impl RunState {
                 dim,
                 dim
             );
+            //println!("xb2 after multi-head layer {} -> {:?}", l, self.xb2);
             // residual connection back into x
             accum(self.x.as_mut(), self.xb2.as_ref());
+            //println!("Activation after residual conn layer {} -> {:?}", l, self.x);
 
             // ffn rmsnorm
             rmsnorm(
@@ -327,6 +341,7 @@ impl RunState {
                 self.x.as_ref(),
                 &self.transformer_weights.rms_ffn_weight[l * dim..((l + 1) * dim)]
             );
+            //println!("xb after ffn rmsnorm layer {} -> {:?}", l, self.xb);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
@@ -337,6 +352,7 @@ impl RunState {
                 dim,
                 hidden_dim
             );
+            //println!("hb at layer {} -> {:?}", l, self.hb);
             matmul(
                 self.hb2.as_mut_ptr(),
                 self.xb.as_ref(),
@@ -344,6 +360,7 @@ impl RunState {
                 dim,
                 hidden_dim
             );
+            //println!("hb2 at layer {} -> {:?}", l, self.hb2);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
             for i in 0..hidden_dim {
@@ -354,7 +371,8 @@ impl RunState {
             for i in 0..hidden_dim {
                 self.hb[i] *= self.hb2[i];
             }
-
+            //println!("hb after elemenwise ops at layer {} -> {:?}", l, self.hb);
+            //println!("w2 here {:?}", &self.transformer_weights.w2[l * dim * hidden_dim..((l + 1) * dim * hidden_dim)]);
             // final matmul to get the output of the ffn
             matmul(
                 self.xb.as_mut_ptr(),
@@ -363,7 +381,7 @@ impl RunState {
                 hidden_dim,
                 dim
             );
-
+            //println!("xb after final matmul at layer {} -> {:?}", l, self.xb);
             // residual connection
             accum(self.x.as_mut(), self.xb.as_ref());
         }
@@ -378,6 +396,9 @@ impl RunState {
             dim,
             self.config.vocab_size as usize
         );
+        //println!("x: {:?}", self.x);
+        //println!("wcls: {:?}", self.transformer_weights.wcls);
+        //println!("logits: {:?}", self.logits);
     }
 }
 
@@ -505,8 +526,20 @@ fn softmax(x: &mut[f32]) {
 fn matmul(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
     // Multiply W (d, n) * X(n, q) and store in xout (d, 1)
     unsafe {
-        sgemm(d, n, 1, 1.0, x.as_ptr(), 1, 1, x.as_ptr(), 1, 1, 0.0, xout, 1, 1);
+        sgemm(d, n, 1, 1.0, w.as_ptr(), 1, 1, x.as_ptr(), 1, 1, 0.0, xout, 1, 1);
     }
+}
+
+fn argmax(v: &[f32]) -> usize {
+    let mut max_val = v[0];
+    let mut max_idx = 0;
+    for i in 1..v.len() {
+        if v[i].ge(&max_val) {
+            max_val = v[i];
+            max_idx = i;
+        }
+    }
+    max_idx
 }
 
 fn bytes_to_box<T: Clone>(bytes: &[u8]) -> Result<Box<[T]>, String> {
@@ -543,9 +576,9 @@ fn read_config(path: &str) -> (Config, TransformerWeights){
     let vec = read(path).expect("error reading model");
     let config_size = std::mem::size_of::<Config>();
     let config_data: Box<[i32]> = bytes_to_box(&vec[0..config_size]).unwrap();
-    let config = Config::new(config_data);
+    let mut config = Config::new(config_data);
     let shared_weights = config.vocab_size > 0;
-    config.vocab_size - config.vocab_size.abs();
+    config.vocab_size = config.vocab_size.abs();
     let transformer_weights = TransformerWeights::new(&vec[config_size..], &config, shared_weights);
     (config, transformer_weights)
 }
@@ -584,16 +617,47 @@ fn main() {
     println!("Max token size: {}", max_token_size);
 
     //TODO: Get from cmd
-    let steps = config.seq_len;
-    let runstate = RunState::new(&config, transformer_weights);
+    //let steps = config.seq_len as usize;
+    let steps = 20;
+    let mut runstate = RunState::new(&config, transformer_weights);
 
     // TODO: Get from cmd
-    let prompt = "Hello, my name is Raghav. Who are you?";
-    let tokens = bpe_encode(prompt, &tokenizer, config.vocab_size as usize, max_token_size as usize)
-        .expect("Could not encode provided prompt");
-    let mut s = String::new();
-    for i in 0..tokens.len() {
-        s.push_str(&*tokenizer.toks[tokens[i]].token.as_str());
+    //let prompt = "Hello, my name is Raghav. Who are you?";
+    let prompt = "Lorem Ipsum";
+    //let prompt_tokens = bpe_encode(prompt, &tokenizer, config.vocab_size as usize, max_token_size as usize)
+    //    .expect("Could not encode provided prompt");
+    let prompt_tokens = vec![];
+
+    // TODO: Get from cmd
+    let temperature: f32 = 0.0;
+    //let mut s = String::new();
+    //for i in 0..prompt_tokens.len() {
+    //    s.push_str(&*tokenizer.toks[tokens[i]].token.as_str());
+    //}
+    //assert!(s == prompt);
+    let tokens = &*tokenizer.toks;
+    let mut cur_token_idx: usize = 1;
+    let mut next: usize = 0;
+    for pos in 0..steps {
+        runstate.transformer(cur_token_idx, pos);
+        if pos < prompt_tokens.len() {
+            next = prompt_tokens[pos];
+        } else {
+            if (temperature == 0.0) {
+                //println!("logits at 6754: {}", runstate.logits[6574]);
+                next = argmax(&runstate.logits);
+                //println!("Next: {}", next);
+            } else {
+
+            }
+        }
+        let nex_tok = match cur_token_idx == 1 && tokens[next].token.starts_with(' ') {
+            true => tokens[next].token[1..].to_string(),
+            false => tokens[next].token.to_string()
+        };
+        print!("{}", nex_tok);
+        io::stdout().flush().unwrap();
+        cur_token_idx = next;
     }
-    assert!(s == prompt);
+    println!();
 }

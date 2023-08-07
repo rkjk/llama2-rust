@@ -1,12 +1,12 @@
-use std::cmp::max;
+
 use std::fs::read;
 use std::io;
 use std::io::Write;
-use std::ops::DerefMut;
+
 use std::ptr;
 use std::rc::Rc;
 use std::ptr::slice_from_raw_parts;
-use matrixmultiply::sgemm;
+
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -261,12 +261,12 @@ impl RunState {
                 let k: &mut [f32] = self.k[(h * head_size)..((h + 1) * head_size)].as_mut();
 
                 for i in (0..head_size).step_by(2) {
-                    let mut q0 = q[i];
-                    let mut q1 = q[i + 1];
-                    let mut k0 = k[i];
-                    let mut k1 = k[i + 1];
-                    let mut fcr = freq_cis_real_row[i/2];
-                    let mut fci = freq_cis_imag_row[i/2];
+                    let q0 = q[i];
+                    let q1 = q[i + 1];
+                    let k0 = k[i];
+                    let k1 = k[i + 1];
+                    let fcr = freq_cis_real_row[i/2];
+                    let fci = freq_cis_imag_row[i/2];
                     q[i] = q0 * fcr - q1 * fci;
                     q[i+1] = q0 * fci + q1 * fcr;
                     k[i] = k0 * fcr - k1 * fci;
@@ -434,7 +434,7 @@ impl Tokenizer {
 }
 
 fn bpe_encode(prompt: &str, tokenizer: &Tokenizer) -> Result<Vec<usize>, String> {
-    let mut tokens: Vec<usize> = Vec::with_capacity(prompt.len());
+    let _tokens: Vec<usize> = Vec::with_capacity(prompt.len());
     let toks = tokenizer.toks.as_ref();
     let str_lookup = |c: String| -> Option<usize> {
         let c_string = c.to_string();
@@ -464,7 +464,6 @@ fn bpe_encode(prompt: &str, tokenizer: &Tokenizer) -> Result<Vec<usize>, String>
             let idx = tokens[i];
             let nex_idx = tokens[i + 1];
             let merged = toks[idx].token.clone() + toks[nex_idx].token.as_str();
-            let m_c = merged.clone();
             if let Some(v) = str_lookup(merged) {
                 let score = toks[v].score;
                 if score > best_score {
@@ -620,7 +619,7 @@ fn read_tokenizer(path: &str, vocab_size: i32) -> (u32, Tokenizer) {
     let max_token_size: u32 = bytes_to_box::<u32>(&vec[offset..offset + u32_size]).unwrap()[0];
     offset += u32_size;
 
-    for i in 0..vocab_size as usize {
+    for _i in 0..vocab_size as usize {
         let token_score: f32 = unaligned_bytes_to_box::<f32>(&vec[offset..offset + f32_size]).unwrap()[0];
         offset += f32_size;
         let num_chars: u32 = unaligned_bytes_to_box::<u32>(&vec[offset..offset + u32_size]).unwrap()[0];
@@ -650,11 +649,9 @@ fn main() {
     let mut runstate = RunState::new(&config, transformer_weights);
 
     // TODO: Get from cmd
-    //let prompt = "Hello, my name is Raghav. Who are you?";
-    let prompt = "Hello,";
+    let prompt = "Hello, my name is Raghav. Who are you?";
     let prompt_tokens = bpe_encode(prompt, &tokenizer)
         .expect("Could not encode provided prompt");
-    //let prompt_tokens = vec![];
 
     // TODO: Get from cmd
     let temperature: f32 = 0.0;
@@ -666,7 +663,7 @@ fn main() {
         if pos < prompt_tokens.len() {
             next = prompt_tokens[pos];
         } else {
-            if (temperature == 0.0) {
+            if temperature == 0.0 {
                 //println!("logits at 6754: {}", runstate.logits[6574]);
                 next = argmax(&runstate.logits);
                 //println!("Next: {}", next);

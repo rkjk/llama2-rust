@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 matrixmultiply = "0.3.7"
+rand = "0.8.5"

@@ -7,6 +7,9 @@ use std::ptr;
 use std::rc::Rc;
 use std::ptr::slice_from_raw_parts;
 
+use rand::Rng;
+use rand::rngs::ThreadRng;
+
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -182,7 +185,8 @@ pub struct RunState {
     // (layer, seq_len, dim)
     value_cache: Box<[f32]>, // (layer, seq_len, dim)},
     config: Config,
-    transformer_weights: TransformerWeights
+    transformer_weights: TransformerWeights,
+    rng: ThreadRng
 }
 
 impl RunState {
@@ -202,6 +206,7 @@ impl RunState {
             value_cache: vec![0.0; (config.n_layers * config.seq_len * config.dim) as usize].into_boxed_slice(),
             config: config.clone(),
             transformer_weights: transformer_weights,
+            rng: rand::thread_rng()
         }
     }
 
@@ -402,6 +407,24 @@ impl RunState {
         //println!("x: {:?}", self.x);
         //println!("wcls: {:?}", self.transformer_weights.wcls);
         //println!("logits: {:?}", self.logits);
+    }
+
+    fn apply_temperature(&mut self, temperature: f32) {
+        for i in 0..self.logits.len() {
+            self.logits[i] /= temperature;
+        }
+    }
+
+    fn sample_from_logits(&mut self) -> usize {
+        let r: f32 = self.rng.gen_range(0.0..1.0);
+        let mut cdf: f32 = 0.0;
+        for i in 0..self.logits.len() {
+            cdf += self.logits[i];
+            if r < cdf {
+                return i;
+            }
+        }
+        self.logits.len() - 1
     }
 }
 
@@ -654,7 +677,7 @@ fn main() {
         .expect("Could not encode provided prompt");
 
     // TODO: Get from cmd
-    let temperature: f32 = 0.0;
+    let temperature: f32 = 0.3;
     let tokens = &*tokenizer.toks;
     let mut cur_token_idx: usize = 1;
     let mut next: usize = 0;
@@ -664,11 +687,11 @@ fn main() {
             next = prompt_tokens[pos];
         } else {
             if temperature == 0.0 {
-                //println!("logits at 6754: {}", runstate.logits[6574]);
                 next = argmax(&runstate.logits);
-                //println!("Next: {}", next);
             } else {
-
+                runstate.apply_temperature(temperature);
+                softmax(&mut runstate.logits);
+                next = runstate.sample_from_logits();
             }
         }
         let nex_tok = match cur_token_idx == 1 && tokens[next].token.starts_with(' ') {

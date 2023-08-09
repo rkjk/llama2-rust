@@ -7,6 +7,8 @@ use std::ptr;
 use std::rc::Rc;
 use std::ptr::slice_from_raw_parts;
 
+use matrixmultiply::sgemm;
+
 use rand::Rng;
 use rand::rngs::ThreadRng;
 
@@ -552,7 +554,7 @@ fn softmax(x: &mut[f32]) {
 
 fn matmul(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
     // Multiply W (d, n) * X(n, 1) and store in xout (d, 1)
-    /*
+
     unsafe {
         sgemm(
             d,
@@ -560,17 +562,17 @@ fn matmul(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
             1,
             1.0,
             w.as_ptr(),
-            d as isize,
-            1,
-            x.as_ptr(),
             n as isize,
             1,
+            x.as_ptr(),
+            1,
+            n as isize,
             0.0,
             xout,
             1,
             1);
     }
-     */
+    /*
     for i in 0..d {
         let mut val: f32 = 0.0;
         for j in 0..n {
@@ -580,6 +582,7 @@ fn matmul(xout: *mut f32, x: &[f32], w: &[f32], n: usize, d: usize) {
             *xout.offset(i as isize) = val;
         }
     }
+    */
 }
 
 fn argmax(v: &[f32]) -> usize {

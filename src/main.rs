@@ -25,6 +25,7 @@ struct Args {
     #[arg(short, long, default_value_t)]
     checkpoint_file: String,
 
+    /// Tokenizer file
     #[arg(short, long, default_value_t)]
     tokenizer_file: String,
 
@@ -32,7 +33,12 @@ struct Args {
     #[arg(short, long, default_value_t = 256)]
     steps: usize,
 
-    #[arg(short, long)]
+    /// Temperature - Set to 0.0 for deterministic output
+    #[arg(short, long, default_value_t = 0.0)]
+    temperature: f32,
+
+    /// Prompt
+    #[arg(short, long, default_value_t)]
     prompt: String
 }
 
@@ -163,7 +169,7 @@ impl TransformerWeights {
         };
 
         assert!(offset == bytes.len());
-        println!("offset: {}, bytes len: {}, shared_weights: {}", offset, bytes.len(), shared_weights);
+        //println!("offset: {}, bytes len: {}, shared_weights: {}", offset, bytes.len(), shared_weights);
 
         TransformerWeights {
             token_embedding_table,
@@ -683,7 +689,6 @@ fn read_tokenizer(path: &str, vocab_size: i32) -> (u32, Tokenizer) {
 }
 
 fn main() {
-    println!("Rust implementation of LLAMA2 inference in C by Andrej Kapathy!");
     let args = Args::parse();
     let mut checkpoint_file: String = args.checkpoint_file;
     if (checkpoint_file.is_empty()) {
@@ -695,22 +700,23 @@ fn main() {
     }
     let (config, transformer_weights) = read_config(&checkpoint_file);
     let (max_token_size, tokenizer) = read_tokenizer(&tokenizer_file, config.vocab_size);
-    println!("Config: {:?}", config);
-    println!("Max token size: {}", max_token_size);
+    //println!("Config: {:?}", config);
+    //println!("Max token size: {}", max_token_size);
 
     let steps = args.steps;
     let mut runstate = RunState::new(&config, transformer_weights);
 
     let prompt: String = args.prompt;
-    let prompt_tokens = bpe_encode(&prompt, &tokenizer)
-        .expect("Could not encode provided prompt");
+    let prompt_tokens = match prompt.is_empty() {
+        false  => bpe_encode(&prompt, &tokenizer).expect("Could not encode provided prompt"),
+        true => vec![]
+    };
 
-    // TODO: Get from cmd
-    let temperature: f32 = 0.3;
+    let temperature: f32 = args.temperature;
     let tokens = &*tokenizer.toks;
     let mut cur_token_idx: usize = 1;
     let mut next: usize = 0;
-
+    println!();
     let now = Instant::now();
     for pos in 0..steps {
         runstate.transformer(cur_token_idx, pos);
@@ -735,6 +741,6 @@ fn main() {
     }
     let elapsed = now.elapsed();
     let toks_per_ms = steps as f64 / elapsed.as_millis() as f64;
-    println!("Elapsed: {:.2?}", elapsed);
+    println!();
     println!("Tokens per second: {}", toks_per_ms * 1000.0);
 }

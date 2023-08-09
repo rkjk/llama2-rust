@@ -10,6 +10,8 @@ use std::ptr::slice_from_raw_parts;
 use rand::Rng;
 use rand::rngs::ThreadRng;
 
+use std::time::Instant;
+
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -681,6 +683,8 @@ fn main() {
     let tokens = &*tokenizer.toks;
     let mut cur_token_idx: usize = 1;
     let mut next: usize = 0;
+
+    let now = Instant::now();
     for pos in 0..steps {
         runstate.transformer(cur_token_idx, pos);
         if pos < prompt_tokens.len() {
@@ -702,5 +706,8 @@ fn main() {
         io::stdout().flush().unwrap();
         cur_token_idx = next;
     }
-    println!();
+    let elapsed = now.elapsed();
+    let toks_per_sec = steps as u64 / elapsed.as_secs();
+    println!("Elapsed: {:.2?}", elapsed);
+    println!("Tokens per second: {}", toks_per_sec);
 }

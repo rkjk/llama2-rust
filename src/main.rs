@@ -14,6 +14,27 @@ use rand::rngs::ThreadRng;
 
 use std::time::Instant;
 
+use clap::Parser;
+
+/// Rust implementation of LLAMA2 inference in C by Andrej Kapathy!
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Model file
+    #[arg(short, long, default_value_t)]
+    checkpoint_file: String,
+
+    #[arg(short, long, default_value_t)]
+    tokenizer_file: String,
+
+    /// Number of tokens to run
+    #[arg(short, long, default_value_t = 256)]
+    steps: usize,
+
+    #[arg(short, long)]
+    prompt: String
+}
+
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -662,23 +683,25 @@ fn read_tokenizer(path: &str, vocab_size: i32) -> (u32, Tokenizer) {
 
 fn main() {
     println!("Rust implementation of LLAMA2 inference in C by Andrej Kapathy!");
-
-    //TODO: Get from cmd
-    let checkpoint_file = "out/model.bin";
-    let tokenizer_file = "tokenizer.bin";
-    let (config, transformer_weights) = read_config(checkpoint_file);
-    let (max_token_size, tokenizer) = read_tokenizer(tokenizer_file, config.vocab_size);
+    let args = Args::parse();
+    let mut checkpoint_file: String = args.checkpoint_file;
+    if (checkpoint_file.is_empty()) {
+        checkpoint_file = "out/model.bin".to_string();
+    }
+    let mut tokenizer_file: String = args.tokenizer_file;
+    if tokenizer_file.is_empty() {
+        tokenizer_file = "tokenizer.bin".to_string();
+    }
+    let (config, transformer_weights) = read_config(&checkpoint_file);
+    let (max_token_size, tokenizer) = read_tokenizer(&tokenizer_file, config.vocab_size);
     println!("Config: {:?}", config);
     println!("Max token size: {}", max_token_size);
 
-    //TODO: Get from cmd
-    //let steps = config.seq_len as usize;
-    let steps = config.seq_len as usize;
+    let steps = args.steps;
     let mut runstate = RunState::new(&config, transformer_weights);
 
-    // TODO: Get from cmd
-    let prompt = "Hello, my name is Raghav. Who are you?";
-    let prompt_tokens = bpe_encode(prompt, &tokenizer)
+    let prompt: String = args.prompt;
+    let prompt_tokens = bpe_encode(&prompt, &tokenizer)
         .expect("Could not encode provided prompt");
 
     // TODO: Get from cmd
@@ -710,7 +733,7 @@ fn main() {
         cur_token_idx = next;
     }
     let elapsed = now.elapsed();
-    let toks_per_sec = steps as u64 / elapsed.as_secs();
+    let toks_per_ms = steps as f64 / elapsed.as_millis() as f64;
     println!("Elapsed: {:.2?}", elapsed);
-    println!("Tokens per second: {}", toks_per_sec);
+    println!("Tokens per second: {}", toks_per_ms * 1000.0);
 }
